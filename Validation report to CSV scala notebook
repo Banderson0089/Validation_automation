@@ -158,7 +158,7 @@ if(filenames.nonEmpty) {
 case class Filename(filename: String)  
   
 val filename = filenames(0).filename  
-val baseUrl = "https://adb-7454574069878794.14.azuredatabricks.net/files/users/Cozeva-Valdation-Reports/"  
+val baseUrl = "<DatabricksURLBase>/files/users/Cozeva-Valdation-Reports/"  
 val url = s"$baseUrl$filename.csv"  
   
 
@@ -172,7 +172,7 @@ println(url)
 // COMMAND ----------
 
 //to download
-//https://adb-7454574069878794.14.azuredatabricks.net/files/users/Cozeva-Valdation-Reports/<Filename>
+//<DatabricksURLBase>/files/users/Cozeva-Valdation-Reports/<Filename>
 
 //to delete
 //dbutils.fs.rm("dbfs:/FileStore/users/Cozeva-Valdation-Reports/<Filename>")  
