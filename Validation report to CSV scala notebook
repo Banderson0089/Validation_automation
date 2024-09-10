@@ -1,3 +1,4 @@
+//Scala notebook
 // Databricks notebook source
 dbutils.widgets.dropdown("targetMarket", "NY", Seq("OH", "NY", "IN","OR","CT","WA","SC", "WI", "GA", "UT", "ID","NJ","TN","KS","KY"), "Target Market");
 
