@@ -1,0 +1,73 @@
+//Scala notebook to check volumetrics of file.  This is run manually parameterized by market and domain to look at data delivery over the last 100 days
+
+
+dbutils.widgets.dropdown("targetMarket", "NY", Seq("OH", "NY", "IN","OR","CT","WA", "SC", "WI", "ID", "UT", "ca_pmgsj", "GA", "NJ", "TN","AZ", "VA"), "Target Market");
+
+var targetMarket = dbutils.widgets.get("targetMarket")
+
+dbutils.widgets.dropdown("targetDomain", "medclaims_hist", Seq("medclaims_hist", "labresult_hist", "pharmclaims_hist", "medsupp_sdr_hist","patient_hist", "Enrollment_hist", "membevent_hist", "provider_hist"), "targetDomain");
+
+var targetDomain = dbutils.widgets.get("targetDomain")
+
+// COMMAND ----------
+
+var df =  spark.sql (""" 
+
+
+
+select distinct loadtime from cozeva_history_validation."""+targetMarket+"""_"""+targetDomain+"""
+where loadtime >= date_sub(current_date(), 100)
+order by loadtime desc
+
+""")
+display (df)
+
+// COMMAND ----------
+
+
+var df = spark.sql("""select distinct loadtime from cozeva_history_validation."""+targetMarket+"""_"""+targetDomain+""" WHERE loadtime >= date_sub(current_date(), 100) ORDER BY loadtime desc""")
+val loadtime_list = (df.select("loadtime").collect().map(_.getString(0)).mkString("','")).mkString
+//println(loadtime_list)
+
+var query = spark.sql("""
+
+SELECT *FROM (
+SELECT loadtime, source_system_sk, count(source_system_sk) as count_source_system_sk
+FROM cozeva_history_validation."""+targetMarket+"""_"""+targetDomain+"""
+WHERE loadtime >= date_sub(current_date(), 100) 
+ --and ValidTill>= date_format(loadtime, 'yyyyMMdd') and ValidFrom < date_format(loadtime, 'yyyyMMdd')
+ --and productcode like ' %DSNSNP%'
+GROUP BY loadtime, source_system_sk
+
+
+)
+
+PIVOT ( SUM(count_source_system_sk)
+FOR loadtime IN ('"""+loadtime_list+"""')
+)
+
+""")
+display(query)
+
+// COMMAND ----------
+
+
+var df = spark.sql("""select distinct loadtime from cozeva_history_validation."""+targetMarket+"""_"""+targetDomain+""" WHERE loadtime >= date_sub(current_date(), 100) ORDER BY loadtime desc""")
+val loadtime_list = (df.select("loadtime").collect().map(_.getString(0)).mkString("','")).mkString
+//println(loadtime_list) 
+
+var query = spark.sql("""
+
+SELECT *FROM (
+SELECT loadtime, payerID, count(payerID) as count_payerID
+  FROM cozeva_history_validation."""+targetMarket+"""_"""+targetDomain+"""
+--WHERE loadtime >= date_sub(current_date(), 100) 
+GROUP BY loadtime, payerID
+)
+
+PIVOT ( SUM(count_payerID)
+FOR loadtime IN ('"""+loadtime_list+"""')
+)
+
+""")
+display(query)
