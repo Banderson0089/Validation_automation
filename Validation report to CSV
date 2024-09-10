@@ -1,0 +1,177 @@
+// Databricks notebook source
+dbutils.widgets.dropdown("targetMarket", "NY", Seq("OH", "NY", "IN","OR","CT","WA","SC", "WI", "GA", "UT", "ID","NJ","TN","KS","KY"), "Target Market");
+
+var targetMarket = dbutils.widgets.get("targetMarket")
+
+dbutils.widgets.dropdown("File_export", "Cozeva_Direct_Feed", Seq("Cozeva_Direct_Feed", "Cozeva_Snowpark_Direct_Feed"), "File_export");
+
+var File_export = dbutils.widgets.get("File_export")
+
+// COMMAND ----------
+
+//Validation Report 
+var df =  spark.sql (""" 
+
+
+with Val_RUN_DATETIME
+(
+    select market, domain, file_export, Run_Date, idrank
+    from (
+          Select Date_format((RUN_DATETIME),'yyyyMMdd') as Run_Date
+          , market, domain, file_export, dense_rank() over (partition by market, file_export, domain order by Date_format((RUN_DATETIME),'yyyyMMdd') desc) as idrank
+          FROM qa.production_file_validations
+          group by Date_format((RUN_DATETIME),'yyyyMMdd'), market,  file_export, domain
+          )
+  where IDrank <= 2
+)
+, ThisWeek(
+select distinct q.market, q.domain, q.file_export, q.severity, q.validation, q.result  from qa.production_file_validations q
+inner join 
+val_run_datetime v on  v.market= q.market and v.domain = q.domain and v.file_export = q.file_export and v.run_date = Date_format((q.RUN_DATETIME),'yyyyMMdd')
+where q.file_export = '"""+File_export+"""' and q.market = '"""+targetMarket+"""' and v.idrank = 1
+)
+,MAXThisWeek(
+select q.file_export, q.domain, MAX(result) as MAXresult from qa.production_file_validations q
+inner join 
+val_run_datetime v on  v.market= q.market and v.domain = q.domain and v.file_export = q.file_export and v.run_date = Date_format((q.RUN_DATETIME),'yyyyMMdd')
+where q.file_export = '"""+File_export+"""' and q.market = '"""+targetMarket+"""' and v.idrank = 1
+group by q.file_export, q.domain, v.Run_Date
+)
+,LastWeek(
+select  distinct q.market, q.domain, q.file_export, q.severity, q.validation, q.result  from qa.production_file_validations q
+inner join 
+val_run_datetime v on  v.market= q.market and v.domain = q.domain and v.file_export = q.file_export and v.run_date = Date_format((q.RUN_DATETIME),'yyyyMMdd')
+where q.file_export = '"""+File_export+"""' and q.market = '"""+targetMarket+"""' and v.idrank = 2
+) 
+,MAXLastWeek(
+select q.file_export, q.domain, MAX(result) as MAXresult from qa.production_file_validations q
+inner join 
+val_run_datetime v on  v.market= q.market and v.domain = q.domain and v.file_export = q.file_export and v.run_date = Date_format((q.RUN_DATETIME),'yyyyMMdd')
+where q.file_export = '"""+File_export+"""' and q.market = '"""+targetMarket+"""' and v.idrank = 2
+group by q.file_export, q.domain, v.Run_Date
+)
+select t.domain as Domain,  CONCAT('"', t.validation, '"') AS Validation, t.severity, t.result as This_Week_Result
+,round((t.result / MT.MAXresult) *100, 2) as Percent_of_Current_Records
+,l.result as Last_Week_Result
+,round((l.result / ML.MAXresult) *100, 2) as Percent_of_Previous_Records
+,t.result - l.result as Delta
+,round(((t.result - l.result)/l.result)*100, 2) as Delta_Percentage
+from ThisWeek t
+left join LastWeek l on t.market = l.market and t.domain = l.domain and t.file_export = l.file_export and  t.validation = l.validation 
+left join MAXThisWeek MT on t.domain = MT.domain and t.file_export = MT.file_export
+left join MAXLastWeek ML on l.domain = ML.domain and l.file_export = ML.file_export
+where t.result > 0 and (t.validation like 'Count of%' or t.validation like 'count of%' or t.validation like 'Threshold%')
+order by t.domain, t.severity, t.result desc
+
+
+""")
+display (df)
+
+// COMMAND ----------
+
+//Name CSV
+final case class Filename(filename: String)  
+  
+val nameDF = spark.sql(s"""   
+  SELECT CONCAT(market, '_Validation_Counts_Percents_Tolerance_', DATE_FORMAT(MAX(RUN_DATETIME), 'yyyyMMdd')) as filename   
+  FROM qa.production_file_validations   
+  WHERE file_export = '"""+File_export+"""' AND market = '"""+targetMarket+"""'   
+  GROUP BY market  
+""")  
+
+val filenames: Array[Filename] = nameDF.as[Filename].collect()  
+  
+ 
+
+// COMMAND ----------
+
+final case class Filename(  
+  Domain: Option[String],   
+  Validation: Option[String],   
+  Severity: Option[String],   
+  This_Week_Result: Option[Long],   
+  Percent_of_Current_Records: Option[Double],   
+  Last_Week_Result: Option[Long],   
+  Percent_of_Previous_Records: Option[Double],   
+  Delta: Option[Long],   
+  Delta_Percentage: Option[Double]  
+)  
+  
+val records: Array[Filename] = df.toDF.as[Filename].collect()
+
+// COMMAND ----------
+
+//Create CSV
+
+val csvData: String =      
+  records.map { record =>      
+    val domain = record.Domain.getOrElse("")  
+    val validation = record.Validation.getOrElse("")  
+    val severity = record.Severity.getOrElse("")  
+    val thisWeekResult = record.This_Week_Result.getOrElse(0L)  
+    val percentOfCurrentRecords = record.Percent_of_Current_Records.getOrElse(0.0)  
+    val lastWeekResult = record.Last_Week_Result.getOrElse(0L)  
+    val percentOfPreviousRecords = record.Percent_of_Previous_Records.getOrElse(0.0)  
+    val delta = record.Delta.getOrElse(0L)  
+    val deltaPercentage = record.Delta_Percentage.getOrElse(0.0)  
+  
+    s"$domain,$validation,$severity,$thisWeekResult,$percentOfCurrentRecords,$lastWeekResult,$percentOfPreviousRecords,$delta,$deltaPercentage"  
+  }.mkString("\n")   
+  
+val header = "Domain,Validation,Severity,This_Week_Result,Percent_of_Current_Records,Last_Week_Result,Percent_of_Previous_Records,Delta,Delta_Percentage\n"      
+val csvTable = header + csvData 
+
+// COMMAND ----------
+
+import java.io.File
+import java.io.PrintWriter
+
+//Name CSV
+final case class Filename(filename: String)  
+
+val nameDF = spark.sql(s"""   
+  SELECT CONCAT(market, '_Validation_Counts_Percents_Tolerance_', DATE_FORMAT(MAX(RUN_DATETIME), 'yyyyMMdd')) as filename   
+  FROM qa.production_file_validations   
+  WHERE file_export = '"""+File_export+"""' AND market = '"""+targetMarket+"""'   
+  GROUP BY market  
+""")  
+
+val filenames: Array[Filename] = nameDF.as[Filename].collect()  
+
+// check if filenames is not empty to avoid java.lang.ArrayIndexOutOfBoundsException  
+if(filenames.nonEmpty) {  
+    val filename = filenames(0).filename + ".csv"   
+
+    // use PrintWriter to write csvTable to a file  
+    val outputPath = "/dbfs/FileStore/users/Cozeva-Valdation-Reports/"  
+    val pw = new PrintWriter(new File(outputPath + filename))  
+    pw.write(csvTable)  
+    pw.close()  
+} else {  
+    println("No filename generated. Skipping file write.")  
+}
+
+// COMMAND ----------
+
+//define url link
+case class Filename(filename: String)  
+  
+val filename = filenames(0).filename  
+val baseUrl = "https://adb-7454574069878794.14.azuredatabricks.net/files/users/Cozeva-Valdation-Reports/"  
+val url = s"$baseUrl$filename.csv"  
+  
+
+
+
+// COMMAND ----------
+
+//print url link
+println(url) 
+
+// COMMAND ----------
+
+//to download
+//https://adb-7454574069878794.14.azuredatabricks.net/files/users/Cozeva-Valdation-Reports/<Filename>
+
+//to delete
+//dbutils.fs.rm("dbfs:/FileStore/users/Cozeva-Valdation-Reports/<Filename>")  
