@@ -1,0 +1,49 @@
+#Jupyter notebook to read return emails and produce excel file. Excel file is setup with Pinvot table to analyize the incoming data.
+
+import win32com.client  
+import openpyxl  
+import re
+  
+# Create an instance of Outlook application  
+outlook = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")  
+  
+# Get the folder by name  
+folder = outlook.Folders["Brian.Anderson@Optum.com"].Folders["Inbox"].Folders["Cozeva_automation"].Folders["Data_Validation"]
+  
+# Get all items in the folder  
+items = folder.Items  
+  
+# Iterate over the items  
+#for item in items:  
+    # Access item properties  
+    # print("Subject:", item.Subject)    
+  
+# Load the existing Excel spreadsheet  
+workbook = openpyxl.load_workbook(r"C:\Users\bande112\Desktop\reports\test1.xlsx")  
+  
+# Select the desired worksheet  
+worksheet = workbook.active  
+worksheet = workbook['Sheet2']  # Replace 'Sheet2' with the actual name of the worksheet    
+# Iterate over the subject lines and add them to the spreadsheet  
+for row, item in enumerate(items, start=2):  
+    row_num = 2  # Starting row number  
+for item in items:  
+    if "DATA VALIDATION" in item.Subject:  
+        # Write the subject to the corresponding column    
+        items_market = item.Subject.split(" ", 1)[0]  
+        worksheet.cell(row=row_num, column=1).value = items_market.split(" ")[0]  
+        # Use regular expression to extract the desired portion  
+        match = re.search(r':(.*?)(?=\d)', item.Subject)  
+        if match:  
+            items_domain = match.group(1)  
+            worksheet.cell(row=row_num, column=2).value = items_domain 
+        items_date = item.Subject.split(" ", 9)[-1]  
+        worksheet.cell(row=row_num, column=3).value = items_date.split(" ")[0]  
+        #item_error = item.body.split  ("Error count:", 1)[0]
+        #worksheet.cell(row=row_num, column=5).value = item_error.split(" ")[1]  
+        row_num += 1  # Increment row number for next item  
+  
+# Adjust the row_num if there were skipped items  
+row_num -= 1  
+workbook.save(r"C:\Users\bande112\Desktop\reports\Cozeva_Validation_Returns.xlsx") 
+print ("Save Complete")
